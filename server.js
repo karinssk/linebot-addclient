@@ -134,6 +134,222 @@ function resolveOwnerName(ownerName, fallbackName) {
   return "ไม่ทราบ";
 }
 
+function formatDateThai(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${day}/${month}/${year}`;
+}
+
+function getWeeklyDateRange() {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(end.getDate() - 6);
+  return {
+    start,
+    end,
+    startLabel: formatDateThai(start),
+    endLabel: formatDateThai(end),
+  };
+}
+
+function buildWeeklySummaryFlexMessage({
+  clients,
+  pendingCount,
+  wonCount,
+  lostCount,
+  startLabel,
+  endLabel,
+}) {
+  const headerRow = {
+    type: "box",
+    layout: "baseline",
+    spacing: "sm",
+    contents: [
+      { type: "text", text: "ชื่อ", size: "sm", color: "#555555", flex: 4 },
+      { type: "text", text: "เบอร์โทร", size: "sm", color: "#555555", flex: 4 },
+      { type: "text", text: "สถานะ", size: "sm", color: "#555555", flex: 4 },
+    ],
+  };
+
+  const rows = clients.slice(0, 10).map((client) => ({
+    type: "box",
+    layout: "baseline",
+    spacing: "sm",
+    contents: [
+      {
+        type: "text",
+        text: client.company_name || "-",
+        size: "sm",
+        color: "#111111",
+        flex: 4,
+        wrap: true,
+      },
+      {
+        type: "text",
+        text: client.phone || "-",
+        size: "sm",
+        color: "#111111",
+        flex: 4,
+        wrap: true,
+      },
+      {
+        type: "text",
+        text: getLeadStatusLabelById(client.lead_status_id),
+        size: "sm",
+        color: "#111111",
+        flex: 4,
+        wrap: true,
+      },
+    ],
+  }));
+
+  if (clients.length > 10) {
+    rows.push({
+      type: "text",
+      text: `และอีก ${clients.length - 10} รายการ`,
+      size: "sm",
+      color: "#888888",
+      margin: "sm",
+    });
+  }
+
+  return {
+    type: "flex",
+    altText: "รายชื่อลูกค้าประจำสัปดาห์",
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        contents: [
+          {
+            type: "text",
+            text: `รายชื่อลูกค้าประจำวันที่ ${startLabel} - ${endLabel} (1 week)`,
+            weight: "bold",
+            size: "md",
+            wrap: true,
+          },
+          {
+            type: "separator",
+            margin: "md",
+          },
+          {
+            type: "box",
+            layout: "vertical",
+            spacing: "xs",
+            margin: "md",
+            contents: [headerRow, ...rows],
+          },
+          {
+            type: "separator",
+            margin: "md",
+          },
+          {
+            type: "text",
+            text: `รอดำเนินการ ${pendingCount} คน`,
+            size: "sm",
+            color: "#111111",
+          },
+          {
+            type: "text",
+            text: `สำเร็จแล้ว ซื้อ(${wonCount} คน) ไม่ซื้อ(${lostCount} คน)`,
+            size: "sm",
+            color: "#111111",
+          },
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        contents: [
+          {
+            type: "button",
+            style: "secondary",
+            action: {
+              type: "postback",
+              label: "ดูรายละเอียด",
+              data: `action=weeklyDetail&start=${startLabel}&end=${endLabel}`,
+            },
+          },
+        ],
+        flex: 0,
+      },
+    },
+  };
+}
+
+function buildWeeklyDetailFlexMessage(clients) {
+  const bubbles = clients.map((client) => {
+    const statusLabel = getLeadStatusLabelById(client.lead_status_id);
+    const parsed = parseAddressAndReason(client.address || "");
+
+    return {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        contents: [
+          {
+            type: "text",
+            text: "รายละเอียดลูกค้า",
+            weight: "bold",
+            size: "md",
+            wrap: true,
+          },
+          {
+            type: "separator",
+            margin: "md",
+          },
+          {
+            type: "box",
+            layout: "vertical",
+            spacing: "xs",
+            margin: "md",
+            contents: [
+              buildField("ชื่อ", client.company_name),
+              buildField("เบอร์โทร", client.phone),
+              buildField("รายละเอียด", parsed.address || "ไม่มี"),
+              ...(parsed.reason ? [buildField("เหตุผล", parsed.reason)] : []),
+              buildField("ผู้รับผิดชอบ", client.owner_line_user_id || "ไม่ทราบ"),
+              buildField("สถานะ", statusLabel),
+            ],
+          },
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        contents: [
+          {
+            type: "button",
+            style: "secondary",
+            action: {
+              type: "postback",
+              label: "อัพเดท",
+              data: `action=update&clientId=${client.id}`,
+            },
+          },
+        ],
+        flex: 0,
+      },
+    };
+  });
+
+  return {
+    type: "flex",
+    altText: "รายละเอียดลูกค้าประจำสัปดาห์",
+    contents: {
+      type: "carousel",
+      contents: bubbles.slice(0, 10),
+    },
+  };
+}
+
 function parseAddressAndReason(address) {
   if (!address) {
     return { address: "", reason: "" };
@@ -717,6 +933,31 @@ async function sendLineReply(replyToken, message) {
   }
 }
 
+async function sendLinePush(to, message) {
+  try {
+    const messages = Array.isArray(message) ? message : [message];
+    const payloadMessages = messages.map((item) =>
+      typeof item === "string" ? { type: "text", text: item } : item
+    );
+    console.log("LINE push payload:", { to, messages: payloadMessages });
+    await axios.post(
+      "https://api.line.me/v2/bot/message/push",
+      {
+        to,
+        messages: payloadMessages,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${LINE_ACCESS_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+  } catch (error) {
+    console.error("Error sending LINE push:", error);
+  }
+}
+
 // Get group summary
 async function getGroupSummary(groupId) {
   try {
@@ -1084,6 +1325,64 @@ app.post("/webhook/line", async (req, res) => {
             console.error("Error updating client status:", error);
             await sendLineReply(replyToken, "เกิดข้อผิดพลาดในการอัพเดทสถานะลูกค้า");
           }
+        } else if (action === "weeklyDetail") {
+          try {
+            const startLabel = params.get("start");
+            const endLabel = params.get("end");
+            const [startDay, startMonth, startYear] = (startLabel || "")
+              .split("/")
+              .map((value) => Number(value));
+            const [endDay, endMonth, endYear] = (endLabel || "")
+              .split("/")
+              .map((value) => Number(value));
+
+            if (
+              !startDay ||
+              !startMonth ||
+              !startYear ||
+              !endDay ||
+              !endMonth ||
+              !endYear
+            ) {
+              await sendLineReply(replyToken, "ไม่สามารถอ่านช่วงวันที่ได้");
+              continue;
+            }
+
+            const startDate = `${startYear}-${String(startMonth).padStart(
+              2,
+              "0"
+            )}-${String(startDay).padStart(2, "0")}`;
+            const endDate = `${endYear}-${String(endMonth).padStart(
+              2,
+              "0"
+            )}-${String(endDay).padStart(2, "0")}`;
+
+            const [detailClients] = await dbPool.query(
+              `
+              SELECT c.id, c.company_name, c.phone, c.address, c.lead_status_id,
+                     u.line_user_id as owner_line_user_id
+              FROM rise_clients c
+              LEFT JOIN rise_users u ON u.id = c.owner_id AND u.deleted = 0
+              WHERE c.deleted = 0
+                AND c.created_date BETWEEN ? AND ?
+                AND c.lead_status_id IN (?, ?)
+              ORDER BY c.created_date DESC
+              LIMIT 10
+              `,
+              [startDate, endDate, LEAD_STATUS_IDS.new, LEAD_STATUS_IDS.negotiation]
+            );
+
+            if (detailClients.length === 0) {
+              await sendLineReply(replyToken, "ไม่พบรายการลูกค้าในช่วงนี้");
+              continue;
+            }
+
+            const detailMessage = buildWeeklyDetailFlexMessage(detailClients);
+            await sendLineReply(replyToken, detailMessage);
+          } catch (error) {
+            console.error("Error loading weekly detail:", error);
+            await sendLineReply(replyToken, "เกิดข้อผิดพลาดในการโหลดรายละเอียด");
+          }
         }
       } else if (event.type === "message" && event.message.type === "text") {
         const text = event.message.text.trim();
@@ -1145,7 +1444,74 @@ app.post("/webhook/line", async (req, res) => {
 
         try {
           // Check if it's a client search command
-          if (text.startsWith("#ลูกค้า")) {
+          if (text === "ลูกค้า") {
+            const { start, end, startLabel, endLabel } = getWeeklyDateRange();
+            const startDate = `${start.getFullYear()}-${String(
+              start.getMonth() + 1
+            ).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+            const endDate = `${end.getFullYear()}-${String(
+              end.getMonth() + 1
+            ).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
+
+            const [pendingClients] = await dbPool.query(
+              `
+              SELECT id, company_name, phone, lead_status_id
+              FROM rise_clients
+              WHERE deleted = 0
+                AND created_date BETWEEN ? AND ?
+                AND lead_status_id IN (?, ?)
+              ORDER BY created_date DESC
+              LIMIT 20
+              `,
+              [startDate, endDate, LEAD_STATUS_IDS.new, LEAD_STATUS_IDS.negotiation]
+            );
+
+            const [[pendingCount]] = await dbPool.query(
+              `
+              SELECT COUNT(*) as total
+              FROM rise_clients
+              WHERE deleted = 0
+                AND created_date BETWEEN ? AND ?
+                AND lead_status_id IN (?, ?)
+              `,
+              [startDate, endDate, LEAD_STATUS_IDS.new, LEAD_STATUS_IDS.negotiation]
+            );
+
+            const [[wonCount]] = await dbPool.query(
+              `
+              SELECT COUNT(*) as total
+              FROM rise_clients
+              WHERE deleted = 0
+                AND created_date BETWEEN ? AND ?
+                AND lead_status_id = ?
+              `,
+              [startDate, endDate, LEAD_STATUS_IDS.won]
+            );
+
+            const [[lostCount]] = await dbPool.query(
+              `
+              SELECT COUNT(*) as total
+              FROM rise_clients
+              WHERE deleted = 0
+                AND created_date BETWEEN ? AND ?
+                AND lead_status_id = ?
+              `,
+              [startDate, endDate, LEAD_STATUS_IDS.lost]
+            );
+
+            const summaryMessage = buildWeeklySummaryFlexMessage({
+              clients: pendingClients,
+              pendingCount: pendingCount.total,
+              wonCount: wonCount.total,
+              lostCount: lostCount.total,
+              startLabel,
+              endLabel,
+            });
+
+            await sendLineReply(replyToken, summaryMessage);
+          }
+          // Check if it's a client search command
+          else if (text.startsWith("#ลูกค้า")) {
             const searchTerm = text.replace("#ลูกค้า", "").trim();
 
             if (searchTerm) {
@@ -1353,5 +1719,104 @@ app.listen(port, () => {
   console.log("  • Group-specific commands");
   console.log("  • Welcome message on join");
 });
+
+let lastWeeklyNotificationDate = "";
+let weeklyNotificationRunning = false;
+
+async function sendWeeklyNotification() {
+  if (weeklyNotificationRunning) {
+    return;
+  }
+
+  const targetRoom = process.env.ROOM_NOTIFICATION_ID;
+  if (!targetRoom) {
+    console.warn("ROOM_NOTIFICATION_ID is not set; skip weekly notification.");
+    return;
+  }
+
+  try {
+    weeklyNotificationRunning = true;
+    const { start, end, startLabel, endLabel } = getWeeklyDateRange();
+    const startDate = `${start.getFullYear()}-${String(
+      start.getMonth() + 1
+    ).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+    const endDate = `${end.getFullYear()}-${String(
+      end.getMonth() + 1
+    ).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
+
+    const [pendingClients] = await dbPool.query(
+      `
+      SELECT id, company_name, phone, lead_status_id
+      FROM rise_clients
+      WHERE deleted = 0
+        AND created_date BETWEEN ? AND ?
+        AND lead_status_id IN (?, ?)
+      ORDER BY created_date DESC
+      LIMIT 20
+      `,
+      [startDate, endDate, LEAD_STATUS_IDS.new, LEAD_STATUS_IDS.negotiation]
+    );
+
+    const [[pendingCount]] = await dbPool.query(
+      `
+      SELECT COUNT(*) as total
+      FROM rise_clients
+      WHERE deleted = 0
+        AND created_date BETWEEN ? AND ?
+        AND lead_status_id IN (?, ?)
+      `,
+      [startDate, endDate, LEAD_STATUS_IDS.new, LEAD_STATUS_IDS.negotiation]
+    );
+
+    const [[wonCount]] = await dbPool.query(
+      `
+      SELECT COUNT(*) as total
+      FROM rise_clients
+      WHERE deleted = 0
+        AND created_date BETWEEN ? AND ?
+        AND lead_status_id = ?
+      `,
+      [startDate, endDate, LEAD_STATUS_IDS.won]
+    );
+
+    const [[lostCount]] = await dbPool.query(
+      `
+      SELECT COUNT(*) as total
+      FROM rise_clients
+      WHERE deleted = 0
+        AND created_date BETWEEN ? AND ?
+        AND lead_status_id = ?
+      `,
+      [startDate, endDate, LEAD_STATUS_IDS.lost]
+    );
+
+    const summaryMessage = buildWeeklySummaryFlexMessage({
+      clients: pendingClients,
+      pendingCount: pendingCount.total,
+      wonCount: wonCount.total,
+      lostCount: lostCount.total,
+      startLabel,
+      endLabel,
+    });
+
+    await sendLinePush(targetRoom, summaryMessage);
+  } catch (error) {
+    console.error("Error sending weekly notification:", error);
+  } finally {
+    weeklyNotificationRunning = false;
+  }
+}
+
+setInterval(async () => {
+  const now = new Date();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const todayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+
+  if (hour === 16 && minute === 30 && lastWeeklyNotificationDate !== todayKey) {
+    lastWeeklyNotificationDate = todayKey;
+    await sendWeeklyNotification();
+  }
+}, 60 * 1000);
 
 module.exports = app;
