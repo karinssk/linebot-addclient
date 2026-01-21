@@ -483,6 +483,10 @@ async function sendLineReply(replyToken, message) {
     const payloadMessages = messages.map((item) =>
       typeof item === "string" ? { type: "text", text: item } : item
     );
+    console.log("LINE reply payload:", {
+      replyToken,
+      messages: payloadMessages,
+    });
     await axios.post(
       "https://api.line.me/v2/bot/message/reply",
       {
@@ -705,9 +709,11 @@ app.get("/api/clients/:id", async (req, res) => {
 // LINE Webhook
 app.post("/webhook/line", async (req, res) => {
   try {
+    console.log("LINE webhook raw body:", req.body);
     const events = req.body.events;
 
     for (const event of events) {
+      console.log("LINE event:", event);
       const userId = event.source.userId;
       const replyToken = event.replyToken;
       const sourceType = event.source.type; // 'user', 'group', 'room'
@@ -725,12 +731,14 @@ app.post("/webhook/line", async (req, res) => {
       } else if (sourceType === "room") {
         sourceInfo.roomId = event.source.roomId;
       }
+      console.log("Source info:", sourceInfo);
 
       if (event.type === "postback") {
         const data = event.postback.data || "";
         const params = new URLSearchParams(data);
         const action = params.get("action");
         const clientId = params.get("clientId");
+        console.log("Postback data:", { data, action, clientId });
 
         if (!action || !clientId) {
           await sendLineReply(replyToken, "ข้อมูลไม่ครบถ้วน");
@@ -740,11 +748,13 @@ app.post("/webhook/line", async (req, res) => {
         if (action === "assign") {
           try {
             const riseUserId = await getRiseUserIdFromLineId(userId);
+            console.log("Assign owner to rise user:", { clientId, riseUserId });
 
             const [result] = await dbPool.query(
               "UPDATE rise_clients SET owner_id = ? WHERE id = ? AND deleted = 0",
               [riseUserId, clientId]
             );
+            console.log("Assign owner result:", result);
 
             if (result.affectedRows === 0) {
               await sendLineReply(replyToken, "ไม่พบลูกค้าที่ต้องการอัพเดท");
@@ -775,6 +785,7 @@ app.post("/webhook/line", async (req, res) => {
               "SELECT id, company_name, phone, address, lead_status_id FROM rise_clients WHERE id = ? AND deleted = 0",
               [clientId]
             );
+            console.log("Update status fetch client:", clients[0]);
 
             if (clients.length === 0) {
               await sendLineReply(replyToken, "ไม่พบลูกค้าที่ต้องการอัพเดท");
@@ -792,6 +803,12 @@ app.post("/webhook/line", async (req, res) => {
             const statusKey = params.get("status");
             const leadStatusId = LEAD_STATUS_IDS[statusKey];
             const statusLabel = LEAD_STATUS_LABELS[statusKey];
+            console.log("Set status request:", {
+              clientId,
+              statusKey,
+              leadStatusId,
+              statusLabel,
+            });
 
             if (!leadStatusId) {
               await sendLineReply(replyToken, "สถานะไม่ถูกต้อง");
@@ -802,6 +819,7 @@ app.post("/webhook/line", async (req, res) => {
               "UPDATE rise_clients SET lead_status_id = ? WHERE id = ? AND deleted = 0",
               [leadStatusId, clientId]
             );
+            console.log("Set status result:", result);
 
             if (result.affectedRows === 0) {
               await sendLineReply(replyToken, "ไม่พบลูกค้าที่ต้องการอัพเดทสถานะ");
@@ -819,6 +837,7 @@ app.post("/webhook/line", async (req, res) => {
         }
       } else if (event.type === "message" && event.message.type === "text") {
         const text = event.message.text.trim();
+        console.log("Incoming text:", text);
 
         try {
           // Check if it's a client search command
@@ -844,11 +863,13 @@ app.post("/webhook/line", async (req, res) => {
           ) {
             // Parse and process client data
             const clientData = parseClientInput(text);
+            console.log("Parsed client data:", clientData);
             const result = await processClientData(
               userId,
               clientData,
               sourceInfo
             );
+            console.log("Process client result:", result);
             await sendLineReply(replyToken, result.message);
           }
           // Help command
