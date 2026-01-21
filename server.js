@@ -69,6 +69,54 @@ function getLeadStatusLabelById(statusId) {
   return LEAD_STATUS_LABELS[statusKey] || "ลูกค้าใหม่";
 }
 
+async function getRiseUserDisplayName(riseUserId) {
+  if (!riseUserId) {
+    return "Unknown";
+  }
+
+  const [rows] = await dbPool.query(
+    "SELECT first_name, last_name FROM rise_users WHERE id = ? AND deleted = 0",
+    [riseUserId]
+  );
+
+  if (rows.length === 0) {
+    return "Unknown";
+  }
+
+  const firstName = rows[0].first_name || "";
+  const lastName = rows[0].last_name || "";
+  const fullName = `${firstName} ${lastName}`.trim();
+  return fullName || "Unknown";
+}
+
+async function getOwnerDisplayName(riseUserId, sourceInfo) {
+  try {
+    if (!riseUserId) {
+      return "Unknown";
+    }
+
+    const [rows] = await dbPool.query(
+      "SELECT line_user_id FROM rise_users WHERE id = ? AND deleted = 0",
+      [riseUserId]
+    );
+
+    if (rows.length === 0 || !rows[0].line_user_id) {
+      return await getRiseUserDisplayName(riseUserId);
+    }
+
+    const lineUserId = rows[0].line_user_id;
+    const profile =
+      sourceInfo?.type === "group" && sourceInfo.groupId
+        ? await getLineGroupMemberProfile(sourceInfo.groupId, lineUserId)
+        : await getLineUserProfile(lineUserId);
+
+    return profile.displayName || (await getRiseUserDisplayName(riseUserId));
+  } catch (error) {
+    console.error("Error getting owner display name:", error);
+    return await getRiseUserDisplayName(riseUserId);
+  }
+}
+
 function parseAddressAndReason(address) {
   if (!address) {
     return { address: "", reason: "" };
@@ -129,6 +177,7 @@ function buildClientFlexMessage({
     buildField("รายละเอียด", clientData.address || "ไม่มี"),
     buildField("Client ID", String(clientId)),
     buildField("บันทึกโดย", userProfile.displayName),
+    buildField("ผู้รับผิดชอบ", userProfile.displayName),
   ];
 
   if (sourceText) {
@@ -197,7 +246,7 @@ function buildClientFlexMessage({
   };
 }
 
-function buildStatusUpdateFlexMessage(clientData) {
+function buildStatusUpdateFlexMessage(clientData, ownerName) {
   const statusLabel = getLeadStatusLabelById(clientData.lead_status_id);
 
   return {
@@ -230,6 +279,7 @@ function buildStatusUpdateFlexMessage(clientData) {
               buildField("ชื่อ", clientData.company_name),
               buildField("เบอร์โทร", clientData.phone),
               buildField("รายละเอียด", clientData.address || "ไม่มี"),
+              buildField("ผู้รับผิดชอบ", ownerName),
               buildField("สถานะ", statusLabel),
             ],
           },
@@ -254,7 +304,7 @@ function buildStatusUpdateFlexMessage(clientData) {
   };
 }
 
-function buildStatusUpdatedFlexMessage(clientData) {
+function buildStatusUpdatedFlexMessage(clientData, ownerName) {
   const statusLabel = getLeadStatusLabelById(clientData.lead_status_id);
   const parsed = parseAddressAndReason(clientData.address || "");
 
@@ -290,10 +340,86 @@ function buildStatusUpdatedFlexMessage(clientData) {
               buildField("รายละเอียด", parsed.address || "ไม่มี"),
               ...(parsed.reason ? [buildField("เหตุผล", parsed.reason)] : []),
               buildField("Client ID", String(clientData.id)),
+              buildField("ผู้รับผิดชอบ", ownerName),
               buildField("สถานะ", statusLabel),
             ],
           },
         ],
+      },
+    },
+  };
+}
+
+function buildAssignedOwnerFlexMessage({ clientData, userProfile, sourceInfo }) {
+  const statusLabel = getLeadStatusLabelById(clientData.lead_status_id);
+  const parsed = parseAddressAndReason(clientData.address || "");
+  const fields = [
+    buildField("ชื่อ", clientData.company_name),
+    buildField("เบอร์โทร", clientData.phone),
+    buildField("รายละเอียด", parsed.address || "ไม่มี"),
+    ...(parsed.reason ? [buildField("เหตุผล", parsed.reason)] : []),
+    buildField("Client ID", String(clientData.id)),
+    buildField("ผู้รับผิดชอบ", userProfile.displayName),
+    buildField("สถานะ", statusLabel),
+  ];
+
+  if (sourceInfo?.type === "group") {
+    fields.push(buildField("จากกลุ่ม", sourceInfo.groupName || "Unknown Group"));
+  }
+
+  fields.push(
+    buildField(
+      "หมายเหตุ",
+      "กรุณาติดต่อลูกค้า และอัพเดทสถานะลูกค้า"
+    )
+  );
+
+  return {
+    type: "flex",
+    altText: "เปลี่ยนผู้รับผิดชอบแล้ว",
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        contents: [
+          {
+            type: "text",
+            text: "เปลี่ยนผู้รับผิดชอบแล้ว",
+            weight: "bold",
+            size: "md",
+            wrap: true,
+          },
+          {
+            type: "separator",
+            margin: "md",
+          },
+          {
+            type: "box",
+            layout: "vertical",
+            spacing: "xs",
+            margin: "md",
+            contents: fields,
+          },
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        contents: [
+          {
+            type: "button",
+            style: "secondary",
+            action: {
+              type: "postback",
+              label: "อัพเดท",
+              data: `action=update&clientId=${clientData.id}`,
+            },
+          },
+        ],
+        flex: 0,
       },
     },
   };
@@ -829,15 +955,22 @@ app.post("/webhook/line", async (req, res) => {
                 ? await getLineGroupMemberProfile(sourceInfo.groupId, userId)
                 : await getLineUserProfile(userId);
 
-            const sourceText =
-              sourceInfo.type === "group"
-                ? `\nจากกลุ่ม: ${sourceInfo.groupName || "Unknown Group"}`
-                : "";
-
-            await sendLineReply(
-              replyToken,
-              `เปลี่ยนผู้รับผิดชอบเป็นของ พี่ ${userProfile.displayName}${sourceText} กรุณาติดต่อลูกค้า และอัพเดทสถานะลูกค้า`
+            const [clients] = await dbPool.query(
+              "SELECT id, company_name, phone, address, lead_status_id FROM rise_clients WHERE id = ? AND deleted = 0",
+              [clientId]
             );
+
+            if (clients.length === 0) {
+              await sendLineReply(replyToken, "ไม่พบลูกค้าที่ต้องการอัพเดท");
+              continue;
+            }
+
+            const assignMessage = buildAssignedOwnerFlexMessage({
+              clientData: clients[0],
+              userProfile,
+              sourceInfo,
+            });
+            await sendLineReply(replyToken, assignMessage);
           } catch (error) {
             console.error("Error assigning client owner:", error);
             await sendLineReply(replyToken, "เกิดข้อผิดพลาดในการอัพเดทผู้รับผิดชอบ");
@@ -845,7 +978,7 @@ app.post("/webhook/line", async (req, res) => {
         } else if (action === "update") {
           try {
             const [clients] = await dbPool.query(
-              "SELECT id, company_name, phone, address, lead_status_id FROM rise_clients WHERE id = ? AND deleted = 0",
+              "SELECT id, company_name, phone, address, lead_status_id, owner_id FROM rise_clients WHERE id = ? AND deleted = 0",
               [clientId]
             );
             console.log("Update status fetch client:", clients[0]);
@@ -855,7 +988,14 @@ app.post("/webhook/line", async (req, res) => {
               continue;
             }
 
-            const updateMessage = buildStatusUpdateFlexMessage(clients[0]);
+            const ownerName = await getOwnerDisplayName(
+              clients[0].owner_id,
+              sourceInfo
+            );
+            const updateMessage = buildStatusUpdateFlexMessage(
+              clients[0],
+              ownerName
+            );
             await sendLineReply(replyToken, updateMessage);
           } catch (error) {
             console.error("Error preparing status update:", error);
@@ -896,7 +1036,7 @@ app.post("/webhook/line", async (req, res) => {
             }
 
             const [clients] = await dbPool.query(
-              "SELECT id, company_name, phone, address, lead_status_id FROM rise_clients WHERE id = ? AND deleted = 0",
+              "SELECT id, company_name, phone, address, lead_status_id, owner_id FROM rise_clients WHERE id = ? AND deleted = 0",
               [clientId]
             );
 
@@ -908,7 +1048,14 @@ app.post("/webhook/line", async (req, res) => {
               continue;
             }
 
-            const updatedMessage = buildStatusUpdatedFlexMessage(clients[0]);
+            const ownerName = await getOwnerDisplayName(
+              clients[0].owner_id,
+              sourceInfo
+            );
+            const updatedMessage = buildStatusUpdatedFlexMessage(
+              clients[0],
+              ownerName
+            );
             await sendLineReply(replyToken, updatedMessage);
           } catch (error) {
             console.error("Error updating client status:", error);
@@ -923,7 +1070,7 @@ app.post("/webhook/line", async (req, res) => {
         if (pendingLost) {
           try {
             const [clients] = await dbPool.query(
-              "SELECT id, company_name, phone, address, lead_status_id FROM rise_clients WHERE id = ? AND deleted = 0",
+              "SELECT id, company_name, phone, address, lead_status_id, owner_id FROM rise_clients WHERE id = ? AND deleted = 0",
               [pendingLost.clientId]
             );
 
@@ -944,7 +1091,7 @@ app.post("/webhook/line", async (req, res) => {
             );
 
             const [updatedClients] = await dbPool.query(
-              "SELECT id, company_name, phone, address, lead_status_id FROM rise_clients WHERE id = ? AND deleted = 0",
+              "SELECT id, company_name, phone, address, lead_status_id, owner_id FROM rise_clients WHERE id = ? AND deleted = 0",
               [pendingLost.clientId]
             );
 
@@ -955,8 +1102,13 @@ app.post("/webhook/line", async (req, res) => {
               continue;
             }
 
+            const ownerName = await getOwnerDisplayName(
+              updatedClients[0].owner_id,
+              sourceInfo
+            );
             const updatedMessage = buildStatusUpdatedFlexMessage(
-              updatedClients[0]
+              updatedClients[0],
+              ownerName
             );
             await sendLineReply(replyToken, updatedMessage);
             continue;
