@@ -56,7 +56,6 @@ const LEAD_STATUS_IDS = {
 };
 
 const STATUS_UPDATE_BUTTONS = [
-  { key: "new", label: "ลูกค้าใหม่" },
   { key: "negotiation", label: "คุยแล้วกำลังตัดสินใจ" },
   { key: "won", label: "ซื้อแล้ว" },
   { key: "lost", label: "ไม่ซื้อ" },
@@ -231,6 +230,49 @@ function buildStatusUpdateFlexMessage(clientData) {
           },
         })),
         flex: 0,
+      },
+    },
+  };
+}
+
+function buildStatusUpdatedFlexMessage(clientData) {
+  const statusLabel = getLeadStatusLabelById(clientData.lead_status_id);
+
+  return {
+    type: "flex",
+    altText: "อัพเดทสถานะลูกค้าแล้ว",
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        contents: [
+          {
+            type: "text",
+            text: "อัพเดทสถานะลูกค้าแล้ว",
+            weight: "bold",
+            size: "md",
+            wrap: true,
+          },
+          {
+            type: "separator",
+            margin: "md",
+          },
+          {
+            type: "box",
+            layout: "vertical",
+            spacing: "xs",
+            margin: "md",
+            contents: [
+              buildField("ชื่อ", clientData.company_name),
+              buildField("เบอร์โทร", clientData.phone),
+              buildField("รายละเอียด", clientData.address || "ไม่มี"),
+              buildField("Client ID", String(clientData.id)),
+              buildField("สถานะ", statusLabel),
+            ],
+          },
+        ],
       },
     },
   };
@@ -826,10 +868,21 @@ app.post("/webhook/line", async (req, res) => {
               continue;
             }
 
-            await sendLineReply(
-              replyToken,
-              `อัพเดทสถานะลูกค้าเป็น: ${statusLabel}`
+            const [clients] = await dbPool.query(
+              "SELECT id, company_name, phone, address, lead_status_id FROM rise_clients WHERE id = ? AND deleted = 0",
+              [clientId]
             );
+
+            if (clients.length === 0) {
+              await sendLineReply(
+                replyToken,
+                `อัพเดทสถานะลูกค้าเป็น: ${statusLabel}`
+              );
+              continue;
+            }
+
+            const updatedMessage = buildStatusUpdatedFlexMessage(clients[0]);
+            await sendLineReply(replyToken, updatedMessage);
           } catch (error) {
             console.error("Error updating client status:", error);
             await sendLineReply(replyToken, "เกิดข้อผิดพลาดในการอัพเดทสถานะลูกค้า");
