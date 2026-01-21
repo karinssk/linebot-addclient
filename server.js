@@ -71,7 +71,7 @@ function getLeadStatusLabelById(statusId) {
 
 async function getRiseUserDisplayName(riseUserId) {
   if (!riseUserId) {
-    return "Unknown";
+    return "";
   }
 
   const [rows] = await dbPool.query(
@@ -80,19 +80,19 @@ async function getRiseUserDisplayName(riseUserId) {
   );
 
   if (rows.length === 0) {
-    return "Unknown";
+    return "";
   }
 
   const firstName = rows[0].first_name || "";
   const lastName = rows[0].last_name || "";
   const fullName = `${firstName} ${lastName}`.trim();
-  return fullName || "Unknown";
+  return fullName || "";
 }
 
 async function getOwnerDisplayName(riseUserId, sourceInfo) {
   try {
     if (!riseUserId) {
-      return "Unknown";
+      return "";
     }
 
     const [rows] = await dbPool.query(
@@ -105,16 +105,33 @@ async function getOwnerDisplayName(riseUserId, sourceInfo) {
     }
 
     const lineUserId = rows[0].line_user_id;
-    const profile =
-      sourceInfo?.type === "group" && sourceInfo.groupId
-        ? await getLineGroupMemberProfile(sourceInfo.groupId, lineUserId)
-        : await getLineUserProfile(lineUserId);
+    const profile = await getLineUserProfile(lineUserId);
+    if (profile.displayName && profile.displayName !== "Unknown User") {
+      return profile.displayName;
+    }
 
-    return profile.displayName || (await getRiseUserDisplayName(riseUserId));
+    return await getRiseUserDisplayName(riseUserId);
   } catch (error) {
     console.error("Error getting owner display name:", error);
     return await getRiseUserDisplayName(riseUserId);
   }
+}
+
+function resolveOwnerName(ownerName, fallbackName) {
+  if (ownerName && ownerName.trim()) {
+    const normalized = ownerName.trim();
+    if (normalized === "Unknown User" || normalized === "Unknown") {
+      return resolveOwnerName("", fallbackName);
+    }
+
+    return ownerName;
+  }
+
+  if (fallbackName && fallbackName.trim()) {
+    return fallbackName;
+  }
+
+  return "ไม่ทราบ";
 }
 
 function parseAddressAndReason(address) {
@@ -178,7 +195,10 @@ function buildClientFlexMessage({
     buildField("รายละเอียด", clientData.address || "ไม่มี"),
     buildField("Client ID", String(clientId)),
     buildField("บันทึกโดย", userProfile.displayName),
-    buildField("ผู้รับผิดชอบ", ownerName || userProfile.displayName),
+    buildField(
+      "ผู้รับผิดชอบ",
+      resolveOwnerName(ownerName, userProfile.displayName)
+    ),
   ];
 
   if (sourceText) {
@@ -280,7 +300,7 @@ function buildStatusUpdateFlexMessage(clientData, ownerName) {
               buildField("ชื่อ", clientData.company_name),
               buildField("เบอร์โทร", clientData.phone),
               buildField("รายละเอียด", clientData.address || "ไม่มี"),
-              buildField("ผู้รับผิดชอบ", ownerName),
+              buildField("ผู้รับผิดชอบ", resolveOwnerName(ownerName)),
               buildField("สถานะ", statusLabel),
             ],
           },
@@ -341,7 +361,7 @@ function buildStatusUpdatedFlexMessage(clientData, ownerName) {
               buildField("รายละเอียด", parsed.address || "ไม่มี"),
               ...(parsed.reason ? [buildField("เหตุผล", parsed.reason)] : []),
               buildField("Client ID", String(clientData.id)),
-              buildField("ผู้รับผิดชอบ", ownerName),
+              buildField("ผู้รับผิดชอบ", resolveOwnerName(ownerName)),
               buildField("สถานะ", statusLabel),
             ],
           },
