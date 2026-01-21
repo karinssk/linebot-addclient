@@ -1193,7 +1193,7 @@ app.post("/webhook/line", async (req, res) => {
         const clientId = params.get("clientId");
         console.log("Postback data:", { data, action, clientId });
 
-        if (!action || !clientId) {
+        if (!action || (action !== "weeklyDetail" && !clientId)) {
           await sendLineReply(replyToken, "ข้อมูลไม่ครบถ้วน");
           continue;
         }
