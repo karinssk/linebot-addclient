@@ -61,10 +61,29 @@ const STATUS_UPDATE_BUTTONS = [
   { key: "lost", label: "ไม่ซื้อ" },
 ];
 
+const pendingLostReasons = new Map();
+
 function getLeadStatusLabelById(statusId) {
   const entries = Object.entries(LEAD_STATUS_IDS);
   const statusKey = entries.find(([, id]) => id === statusId)?.[0];
   return LEAD_STATUS_LABELS[statusKey] || "ลูกค้าใหม่";
+}
+
+function parseAddressAndReason(address) {
+  if (!address) {
+    return { address: "", reason: "" };
+  }
+
+  const marker = " reason: ";
+  const markerIndex = address.indexOf(marker);
+  if (markerIndex === -1) {
+    return { address: address, reason: "" };
+  }
+
+  return {
+    address: address.slice(0, markerIndex).trim(),
+    reason: address.slice(markerIndex + marker.length).trim(),
+  };
 }
 
 function buildField(label, value) {
@@ -237,6 +256,7 @@ function buildStatusUpdateFlexMessage(clientData) {
 
 function buildStatusUpdatedFlexMessage(clientData) {
   const statusLabel = getLeadStatusLabelById(clientData.lead_status_id);
+  const parsed = parseAddressAndReason(clientData.address || "");
 
   return {
     type: "flex",
@@ -267,7 +287,8 @@ function buildStatusUpdatedFlexMessage(clientData) {
             contents: [
               buildField("ชื่อ", clientData.company_name),
               buildField("เบอร์โทร", clientData.phone),
-              buildField("รายละเอียด", clientData.address || "ไม่มี"),
+              buildField("รายละเอียด", parsed.address || "ไม่มี"),
+              ...(parsed.reason ? [buildField("เหตุผล", parsed.reason)] : []),
               buildField("Client ID", String(clientData.id)),
               buildField("สถานะ", statusLabel),
             ],
@@ -857,6 +878,12 @@ app.post("/webhook/line", async (req, res) => {
               continue;
             }
 
+            if (statusKey === "lost") {
+              pendingLostReasons.set(userId, { clientId });
+              await sendLineReply(replyToken, "กรุณาระบุเหตุผล");
+              continue;
+            }
+
             const [result] = await dbPool.query(
               "UPDATE rise_clients SET lead_status_id = ? WHERE id = ? AND deleted = 0",
               [leadStatusId, clientId]
@@ -891,6 +918,55 @@ app.post("/webhook/line", async (req, res) => {
       } else if (event.type === "message" && event.message.type === "text") {
         const text = event.message.text.trim();
         console.log("Incoming text:", text);
+
+        const pendingLost = pendingLostReasons.get(userId);
+        if (pendingLost) {
+          try {
+            const [clients] = await dbPool.query(
+              "SELECT id, company_name, phone, address, lead_status_id FROM rise_clients WHERE id = ? AND deleted = 0",
+              [pendingLost.clientId]
+            );
+
+            if (clients.length === 0) {
+              pendingLostReasons.delete(userId);
+              await sendLineReply(replyToken, "ไม่พบลูกค้าที่ต้องการอัพเดทสถานะ");
+              continue;
+            }
+
+            const client = clients[0];
+            const reason = text.trim();
+            const parsed = parseAddressAndReason(client.address || "");
+            const mergedAddress = `${parsed.address} reason: ${reason}`.trim();
+
+            await dbPool.query(
+              "UPDATE rise_clients SET lead_status_id = ?, address = ? WHERE id = ? AND deleted = 0",
+              [LEAD_STATUS_IDS.lost, mergedAddress, pendingLost.clientId]
+            );
+
+            const [updatedClients] = await dbPool.query(
+              "SELECT id, company_name, phone, address, lead_status_id FROM rise_clients WHERE id = ? AND deleted = 0",
+              [pendingLost.clientId]
+            );
+
+            pendingLostReasons.delete(userId);
+
+            if (updatedClients.length === 0) {
+              await sendLineReply(replyToken, "อัพเดทสถานะเรียบร้อยแล้ว");
+              continue;
+            }
+
+            const updatedMessage = buildStatusUpdatedFlexMessage(
+              updatedClients[0]
+            );
+            await sendLineReply(replyToken, updatedMessage);
+            continue;
+          } catch (error) {
+            console.error("Error updating lost reason:", error);
+            pendingLostReasons.delete(userId);
+            await sendLineReply(replyToken, "เกิดข้อผิดพลาดในการบันทึกเหตุผล");
+            continue;
+          }
+        }
 
         try {
           // Check if it's a client search command
