@@ -1,0 +1,51 @@
+when someone in the room is save new customer like this >>
+input:คุณหมวย 089-156-9150 สนใจใบตัดวงแหวน 410 แจ้งราคาไปแล้ว 3900 บาท ลูกค้าถามถึงราคาส่วนลด  โทรหาลูกค้าด้วยค่ะ
+output: บันทึกลูกค้าใหม่สำเร็จ
+ชื่อ: คุณหมวย
+เบอร์โทร: 0891569150
+รายละเอียด: สนใจใบตัดวงแหวน 410 แจ้งราคาไปแล้ว 3900 บาท ลูกค้าถามถึงราคาส่วนลด  โทรหาลูกค้าด้วยค่ะ
+Client ID: 438
+บันทึกโดย: Aof ❣️
+จากกลุ่ม: เพิ่มข้อมูลลูกค้า
+
+
+
+more info: >
+db status new , qualified , discussion , negotiation , won  , lost
+
+status mapping for show to line users 
+
+new = ลูกค้าใหม่ 
+negotiation = คุยแล้วกำลังตัดสินใจ
+won = ซื้อแล้ว 
+lost = ไม่ซื้อ
+ื
+
+
+
+
+i need to change output from plain text to flex card with 
+
+
+new output flex card with 2 button:
+
+ชื่อ: คุณหมวย
+เบอร์โทร: 0891569150
+รายละเอียด: สนใจใบตัดวงแหวน 410 แจ้งราคาไปแล้ว 3900 บาท ลูกค้าถามถึงราคาส่วนลด  โทรหาลูกค้าด้วยค่ะ
+Client ID: 438
+บันทึกโดย: Aof ❣️
+จากกลุ่ม: เพิ่มข้อมูลลูกค้า
+สถานะ: ลูกค้าใหม่ 
+button[ติดต่อ] button[อัพเดท]
+
+
+if click at button[ติดต่อ] will change owner to user who cliked and reply with word>>
+เปลี่ยนผู้รับผิดชอบเป็นของ พี่ ${userProfile.displayName}${sourceText} กรุณาติดต่อลูกค้า และอัพเดทสถานะลูกค้า
+
+click at button[อัพเดท] will ask user with flex card with 4 button like this>>
+อัพเดทสถานะลูกค้า
+ชื่อ: คุณหมวย
+เบอร์โทร: 0891569150
+รายละเอียด: สนใจใบตัดวงแหวน 410 แจ้งราคาไปแล้ว 3900 บาท ลูกค้าถามถึงราคาส่วนลด  โทรหาลูกค้าด้วยค่ะ
+สถานะ: ลูกค้าใหม่ 
+button[คุยแล้วกำลังตัดสินใจ]  button[ซื้อแล้ว] lost[ไม่ซื้อ]
