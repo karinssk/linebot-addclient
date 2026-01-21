@@ -165,6 +165,7 @@ function buildClientFlexMessage({
   userProfile,
   sourceInfo,
   statusLabel,
+  ownerName,
 }) {
   const sourceText =
     sourceInfo?.type === "group"
@@ -177,7 +178,7 @@ function buildClientFlexMessage({
     buildField("รายละเอียด", clientData.address || "ไม่มี"),
     buildField("Client ID", String(clientId)),
     buildField("บันทึกโดย", userProfile.displayName),
-    buildField("ผู้รับผิดชอบ", userProfile.displayName),
+    buildField("ผู้รับผิดชอบ", ownerName || userProfile.displayName),
   ];
 
   if (sourceText) {
@@ -607,12 +608,14 @@ async function processClientData(userId, clientData, sourceInfo = {}) {
 
     const clientId = result.insertId;
 
+    const ownerName = await getOwnerDisplayName(riseUserId, sourceInfo);
     const responseMessage = buildClientFlexMessage({
       clientData,
       clientId,
       userProfile,
       sourceInfo,
       statusLabel: LEAD_STATUS_LABELS.new,
+      ownerName,
     });
 
     return {
